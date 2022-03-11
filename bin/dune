@@ -1,0 +1,5 @@
+(executable
+ (public_name TAA)
+ (name main)
+ (libraries TAA)
+ (flags -w +A-70 -warn-error +A-70-27))
