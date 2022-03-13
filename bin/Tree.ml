@@ -23,18 +23,19 @@ module type T = sig
   val height : t -> int
   val rotate : dir -> t -> t
   val change : dir -> t -> t -> t
+  val mem : elt -> t -> bool
   val find : elt -> t -> t
   val insert : elt -> t -> t
-  val remove : elt -> t -> t
+  val delete : elt -> t -> t
   val map : (elt -> elt) -> t -> t
   val iter : (elt -> unit) -> t -> unit
   val fold : ('a -> elt -> 'a) -> 'a -> t -> 'a
 end
 
 module BST (Ord : OrderedType) = struct
-  type elt = Ord.t
-  type t = Node of { l : t; v : elt; r : t } | Leaf
   type dir = Left | Right
+  type elt = Ord.t
+  type t = Leaf | Node of { l : t; v : elt; r : t }
 
   exception Invalid_rotation
   exception Invalid_change
@@ -89,55 +90,8 @@ module BST (Ord : OrderedType) = struct
             Node { l = a; v = x; r = Node { l = b; v = y; r = c } }
         | Node _ | Leaf -> raise Invalid_rotation)
 
-  let rec find key tree =
-    match tree with
-    | Node { v; _ } when key = v -> tree
-    | Node { v; r; _ } when key > v -> find v r
-    | Node { v; l; _ } when key < v -> find v l
-    | Node _ -> assert false
-    | Leaf -> raise Not_found
-
-  let rec insert key tree =
-    match tree with
-    | Node { v; _ } when v = key -> tree
-    | Node { l; v; r } when v < key ->
-        let r = insert key r in
-        Node { l; v; r }
-    | Node { l; v; r } when v > key ->
-        let l = insert key l in
-        Node { l; v; r }
-    | Node _ -> assert false
-    | Leaf -> Node { l = Leaf; v = key; r = Leaf }
-
-  let rec remove key tree =
-    match tree with
-    | Node { l = Leaf; v; r = Leaf } when key <> v -> tree
-    | Node { l = Leaf; v; r = Leaf } when key = v -> Leaf
-    | Node { l = Leaf; v; _ } when key < v -> tree
-    | Node { l = Leaf; v; r } when key = v -> r
-    | Node { l = Leaf; v; r } when key > v ->
-        let r = remove key r in
-        Node { l = Leaf; v; r }
-    | Node { r = Leaf; v; _ } when key > v -> tree
-    | Node { r = Leaf; v; l } when key = v -> l
-    | Node { r = Leaf; v; l } when key < v ->
-        let l = remove key l in
-        Node { r = Leaf; l; v }
-    | Node { l; v; r } when key = v ->
-        let v = max l in
-        let l = remove v l in
-        Node { l; v; r }
-    | Node { l; v; r } when key > v ->
-        let r = remove key r in
-        Node { l; v; r }
-    | Node { l; v; r } when key < v ->
-        let l = remove key l in
-        Node { l; v; r }
-    | Node _ -> assert false
-    | Leaf -> Leaf
-
-  let change child replacement tree =
-    match child with
+  let change side replacement tree =
+    match side with
     | Left -> (
         match tree with
         | Node { v; r; _ } -> Node { l = replacement; v; r }
@@ -146,6 +100,61 @@ module BST (Ord : OrderedType) = struct
         match tree with
         | Node { l; v; _ } -> Node { l; v; r = replacement }
         | Leaf -> raise Invalid_change)
+
+  let rec mem el tree =
+    match tree with
+    | Node { v; _ } when el = v -> true
+    | Node { v; r; _ } when el > v -> mem v r
+    | Node { v; l; _ } when el < v -> mem v l
+    | Node _ -> false
+    | Leaf -> raise Not_found
+
+  let rec find el tree =
+    match tree with
+    | Node { v; _ } when el = v -> tree
+    | Node { v; r; _ } when el > v -> find el r
+    | Node { v; l; _ } when el < v -> find el l
+    | Node _ -> assert false
+    | Leaf -> raise Not_found
+
+  let rec insert el tree =
+    match tree with
+    | Node { v; _ } when v = el -> tree
+    | Node { l; v; r } when v < el ->
+        let r = insert el r in
+        Node { l; v; r }
+    | Node { l; v; r } when v > el ->
+        let l = insert el l in
+        Node { l; v; r }
+    | Node _ -> assert false
+    | Leaf -> Node { l = Leaf; v = el; r = Leaf }
+
+  let rec delete el tree =
+    match tree with
+    | Node { l = Leaf; v; r = Leaf } when el <> v -> tree
+    | Node { l = Leaf; v; r = Leaf } when el = v -> Leaf
+    | Node { l = Leaf; v; _ } when el < v -> tree
+    | Node { l = Leaf; v; r } when el = v -> r
+    | Node { l = Leaf; v; r } when el > v ->
+        let r = delete el r in
+        Node { l = Leaf; v; r }
+    | Node { r = Leaf; v; _ } when el > v -> tree
+    | Node { r = Leaf; v; l } when el = v -> l
+    | Node { r = Leaf; v; l } when el < v ->
+        let l = delete el l in
+        Node { r = Leaf; l; v }
+    | Node { l; v; r } when el = v ->
+        let v = max l in
+        let l = delete v l in
+        Node { l; v; r }
+    | Node { l; v; r } when el > v ->
+        let r = delete el r in
+        Node { l; v; r }
+    | Node { l; v; r } when el < v ->
+        let l = delete el l in
+        Node { l; v; r }
+    | Node _ -> assert false
+    | Leaf -> Leaf
 
   let rec map f tree =
     match tree with
@@ -202,7 +211,7 @@ module AVL (Ord : OrderedType) = struct
       |> change Left (balance (left tree))
       |> change Right (balance (right tree))
 
-  let insert x tree = tree |> insert x |> balance
+  let insert el tree = tree |> insert el |> balance
 end
 
 module RBT (Ord : OrderedType) = struct
@@ -225,14 +234,91 @@ module RBT (Ord : OrderedType) = struct
         color
     | Leaf -> Black
 
-  let insert x tree = insert (x, Red) tree
+  let value tree =
+    match tree with
+    | Node { v; _ } ->
+        let value, _ = v in
+        value
+    | Leaf -> raise Not_found
+
+  let balance tree =
+    match tree with
+    | Node
+        {
+          l = Node { l = Node { l = a; v = x, Red; r = b }; v = y, Red; r = c };
+          v = z, Black;
+          r = d;
+        }
+    | Node
+        {
+          l = Node { l = a; v = x, Red; r = Node { l = b; v = y, Red; r = c } };
+          v = z, Black;
+          r = d;
+        }
+    | Node
+        {
+          l = a;
+          v = x, Black;
+          r = Node { l = Node { l = b; v = y, Red; r = c }; v = z, Red; r = d };
+        }
+    | Node
+        {
+          l = a;
+          v = x, Black;
+          r = Node { l = b; v = y, Red; r = Node { l = c; v = z, Red; r = d } };
+        } ->
+        Node
+          {
+            l = Node { l = a; v = (x, Black); r = b };
+            v = (y, Red);
+            r = Node { l = c; v = (z, Black); r = d };
+          }
+    | Node _ -> tree
+    | Leaf -> assert false
+
+  let insert el tree =
+    let rec ins tree =
+      match tree with
+      | Node { v = v, _; _ } when el = v -> tree
+      | Node { l; v = v, c; r } when el < v ->
+          let l = ins l in
+          balance (Node { l; v = (v, c); r })
+      | Node { l; v = v, c; r } when el > v ->
+          let r = ins r in
+          balance (Node { l; v = (v, c); r })
+      | Node _ -> assert false
+      | Leaf -> Node { l = Leaf; v = (el, Red); r = Leaf }
+    in
+    match ins tree with
+    | Node { l; v = v, _; r } -> Node { l; v = (v, Black); r }
+    | Leaf -> assert false
+
+  let delete el tree =
+    let rec del el tree =
+      match tree with
+      | Node { l; v = v, _; r } when el = v ->
+          let el, _ = max l in
+          let l = del el l in
+          balance (Node { l; v = (el, Red); r })
+      | Node { l; v = v, c; r } when el < v ->
+          let l = del el l in
+          balance (Node { l; v = (v, c); r })
+      | Node { l; v = v, c; r } when el > v ->
+          let r = del el r in
+          balance (Node { l; v = (v, c); r })
+      | Node _ -> assert false
+      | Leaf -> tree
+    in
+    match del el tree with
+    | Node { l; v = v, _; r } -> Node { l; v = (v, Black); r }
+    | Leaf -> assert false
 end
 
 module ST (Ord : OrderedType) = struct
   include BST (Ord)
 
-  let splay x tree = tree
-  let find x tree = tree |> splay x |> find x
-  let insert x tree = tree |> insert x |> splay x
-  let remove x tree = tree |> splay x |> remove x
+  let splay el tree = tree
+  let find el tree = tree |> splay el |> find el
+  let insert el tree = tree |> insert el |> splay el
+  let remove el tree = tree |> splay el |> delete el
 end
