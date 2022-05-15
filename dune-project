@@ -5,22 +5,22 @@
 (generate_opam_files true)
 
 (source
- (github username/reponame))
+ (github fraguinha/TAA))
 
-(authors "Author Name")
+(authors "João Fraga")
 
-(maintainers "Maintainer Name")
+(maintainers "João Fraga")
 
-(license LICENSE)
+(license MIT)
 
-(documentation https://url/to/documentation)
+; (documentation https://url/to/documentation)
 
 (package
  (name TAA)
- (synopsis "A short synopsis")
- (description "A longer description")
+ (synopsis "Advanced Topics in Algorithms project")
+ ;(description "")
  (depends ocaml dune)
- (tags
-  (topics "to describe" your project)))
+ ;(tags (topics "to describe" your project))
+)
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/dune-files.html#dune-project
