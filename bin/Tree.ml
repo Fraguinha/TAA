@@ -1,3 +1,11 @@
+(* This is the file where the trees are implemented.
+
+   There are 2 signatures (OrderedType and T) which define the "interfaces" shared between all the trees.
+
+   OrderedType is the signature for values that the trees store. (the values need to be "Comparable").
+   T is the signature for a tree, it includes a bunch of usefull tree functions that need to be implemented.
+*)
+
 module type OrderedType = sig
   type t
 
@@ -31,6 +39,15 @@ module type T = sig
   val iter : (elt -> unit) -> t -> unit
   val fold : ('a -> elt -> 'a) -> 'a -> t -> 'a
 end
+
+(* There are also 5 functors which given an OrderedType return a module that implements a tree for it.
+
+   BST returns a simple binary tree.
+   AVL returns a AVL tree.
+   RBT returns a Red-Black tree.
+   ST  returns a Splay tree.
+   TH  returns a Treap.
+*)
 
 module BST (Ord : OrderedType) = struct
   type dir = Left | Right
@@ -182,6 +199,15 @@ module BST (Ord : OrderedType) = struct
     | Leaf -> init
 end
 
+(* After implementing the basic BST we can include its functionality in all of the other trees,
+   updating only the parts where functionality differs.
+
+   in the AVL case, we observe that almost all the functions are the same as BST except inserting.
+
+   after insertion there is a balancing step required, so we implement the balance function, and
+   update the insert function to be the BST insert followed by the balancing function.
+*)
+
 module AVL (Ord : OrderedType) = struct
   include BST (Ord)
 
@@ -214,6 +240,31 @@ module AVL (Ord : OrderedType) = struct
   let insert el tree = tree |> insert el |> balance
 end
 
+(* in the RBT case, we dont only want to store the OrderedType given by the programmer,
+   we also need to store the node color, so we create a new extended OrderedType for BST.
+
+   the functions that differ from the regular BST are insertion and deletion.
+   for both functions we will assume the tree was a valid RBT before the operation.
+
+   after the operation, there are only 2 ways the tree could've become invalid:
+   the root could've become red, or there could be 2 consecutive red nodes.
+
+   we can fix both of these by forcing the root to be black and checking for red-red inconsistencies.
+
+   the balance function is the one that checks for these red-red inconsistencies and fixes them.
+
+   the red-red inconsistencies are divided into 4 cases:
+
+   red node is to the left of red parent to the left of grandparent.
+   red node is to the right of red parent to the left of grandparent.
+   red node is to the left of red parent to the right of grandparent.
+   red node is to the right of red parent to the right of grandparent.
+
+   however with clever naming of the nodes, all 4 of these cases can be balanced the same way.
+
+   see page 27 of Purely Functional Data Structures by Chris Okasaki for a good visualization.
+*)
+
 module RBT (Ord : OrderedType) = struct
   type color = Red | Black
 
@@ -227,19 +278,19 @@ module RBT (Ord : OrderedType) = struct
     let compare x y = Ord.compare (value x) (value y)
   end)
 
-  let color tree =
-    match tree with
-    | Node { v; _ } ->
-        let _, color = v in
-        color
-    | Leaf -> Black
-
   let value tree =
     match tree with
     | Node { v; _ } ->
         let value, _ = v in
         value
     | Leaf -> raise Not_found
+
+  let color tree =
+    match tree with
+    | Node { v; _ } ->
+        let _, color = v in
+        color
+    | Leaf -> Black
 
   let balance tree =
     match tree with
@@ -306,7 +357,7 @@ module RBT (Ord : OrderedType) = struct
       | Node { l; v = v, c; r } when el > v ->
           let r = del el r in
           balance (Node { l; v = (v, c); r })
-      | Node _ -> assert false
+      | Node _ -> raise Not_found
       | Leaf -> tree
     in
     match del el tree with
@@ -314,11 +365,80 @@ module RBT (Ord : OrderedType) = struct
     | Leaf -> assert false
 end
 
+(* in the ST case, much like the AVL case, we only need to introduce a splay function
+   and update the basic BST functions to add the splay functionality (move to root) before/after each operation.
+*)
+
 module ST (Ord : OrderedType) = struct
   include BST (Ord)
 
-  let splay el tree = tree
+  let rec splay el tree =
+    match tree with
+    | Node { l = Node { v = x; _ }; _ } when x = el -> rotate Right tree
+    | Node { r = Node { v = x; _ }; _ } when x = el -> rotate Left tree
+    | Node { l = Node { l = Node { v; _ }; _ }; _ } when el = v ->
+        tree |> change Left (rotate Right (left tree)) |> rotate Right
+    | Node { l = Node { r = Node { v; _ }; _ }; _ } when el = v ->
+        tree |> change Left (rotate Left (left tree)) |> rotate Right
+    | Node { r = Node { r = Node { v; _ }; _ }; _ } when el = v ->
+        tree |> change Right (rotate Left (right tree)) |> rotate Left
+    | Node { r = Node { l = Node { v; _ }; _ }; _ } when el = v ->
+        tree |> change Right (rotate Right (right tree)) |> rotate Left
+    | Node { l; v; r } when el < v ->
+        let l = splay el l in
+        splay el (Node { l; v; r })
+    | Node { l; v; r } when el > v ->
+        let r = splay el r in
+        splay el (Node { l; v; r })
+    | Node { v; _ } when el = v -> tree
+    | Node _ -> raise Not_found
+    | Leaf -> Leaf
+
   let find el tree = tree |> splay el |> find el
   let insert el tree = tree |> insert el |> splay el
   let remove el tree = tree |> splay el |> delete el
+end
+
+(* in the TH case, like with RBT, we need to extend the given OrderedType.
+
+   TH is probabilistic, so we will need to add an extra randomly generated integer be added to every node,
+   a TH is a BST with respect to the values, and a heap with respect to these random integers.
+*)
+
+module TH (Ord : OrderedType) = struct
+  let () = Random.self_init ()
+
+  include BST (struct
+    type t = Ord.t * int
+
+    let value t =
+      let value, _ = t in
+      value
+
+    let compare x y = Ord.compare (value x) (value y)
+  end)
+
+  let balance tree =
+    match tree with
+    | Node { v = _, px; l = Node { v = _, x; _ }; _ } when x < px ->
+        rotate Right tree
+    | Node { v = _, px; r = Node { v = _, x; _ }; _ } when x < px ->
+        rotate Left tree
+    | Node _ -> tree
+    | Leaf -> Leaf
+
+  let insert el tree =
+    let rec ins tree =
+      match tree with
+      | Node { v = v, _; _ } when el = v -> tree
+      | Node { l; v = v, x; r } when el < v ->
+          let l = ins l in
+          balance (Node { l; v = (v, x); r })
+      | Node { l; v = v, x; r } when el > v ->
+          let r = ins r in
+          balance (Node { l; v = (v, x); r })
+      | Node _ -> assert false
+      | Leaf -> Node { l = Leaf; v = (el, Random.int 1_000_000); r = Leaf }
+    in
+    ins tree
 end
